@@ -1,0 +1,169 @@
+<?php
+define('MISTRAL_API_KEY', ' YOUR API KEY ');
+define('MISTRAL_ENDPOINT', 'https://api.mistral.ai/v1/chat/completions');
+define('MISTRAL_MODEL', 'pixtral-12b-2409');
+
+session_start();
+if (isset($_GET['reset'])) {
+    session_destroy();
+    header("Location: index.php");
+    exit;
+}
+
+if (!isset($_SESSION['story'])) {
+    $_SESSION['story'] = "";
+    $_SESSION['title'] = "";
+    $_SESSION['summary'] = [];
+    $_SESSION['current_page'] = 1;
+    $_SESSION['current_chapter'] = 1;
+}
+
+function callMistralAPI($prompt)
+{
+    $data = [
+        'model' => MISTRAL_MODEL,
+        'messages' => [['role' => 'user', 'content' => $prompt]],
+        'temperature' => 0.7,
+        'max_tokens' => 8000
+    ];
+
+    $ch = curl_init(MISTRAL_ENDPOINT);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_POST, true);
+    curl_setopt($ch, CURLOPT_HTTPHEADER, [
+        'Authorization: Bearer ' . MISTRAL_API_KEY,
+        'Content-Type: application/json'
+    ]);
+    curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($data));
+    $response = curl_exec($ch);
+    curl_close($ch);
+
+    $result = json_decode($response, true);
+    return $result['choices'][0]['message']['content'] ?? '';
+}
+
+// Étape 1 : Saisie du sujet
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['subject'])) {
+    $_SESSION['title'] = trim($_POST['subject']);
+    $summary_prompt = "Écris un sommaire **unique**, **profond**, **intellectuellement exaltant**, **poétique**, **émotionnellement bouleversant** et **stylistiquement puissant**.
+ intitulé '{$_SESSION['title']}', avec une liste des chapitres et des 200 pages correspondantes. Tu es un écrivain de génie, un érudit du verbe, un artisan du récit. Rédige un sommaire détaillé pour un roman intitulé '{$_SESSION['title']}'. Ce sommaire doit être d'une richesse intellectuelle et stylistique exceptionnelle, structuré en 20 chapitres, chacun contenant 10 pages, pour un total de 200 pages.
+
+Chaque chapitre doit posséder une profondeur narrative unique, mêlant tension, poésie et philosophie. L'intrigue doit évoluer de manière magistrale, avec des rebondissements captivants et des réflexions transcendantes. Intègre des références historiques, philosophiques et artistiques, et tisse des liens subtils avec les grandes œuvres de la littérature. Sois innovant, ambitieux et hors du commun.  
+
+Le ton doit être envoûtant, mystérieux, presque hypnotique, avec des descriptions évocatrices et une atmosphère immersive. Laisse transparaître une touche de lyrisme, une gravité céleste, un souffle qui saisit l’âme du lecteur. Chaque chapitre doit être résumé avec une densité intellectuelle, donnant à voir l’évolution des personnages, les dilemmes existentiels, et les ascensions ou descentes de leur destin.";
+
+    $summary = callMistralAPI($summary_prompt);
+    $_SESSION['summary'] = explode("\n", $summary);
+
+    file_put_contents($_SESSION['title'] . ".json", json_encode($_SESSION['summary']));
+
+    header("Location: index.php?start=1");
+    exit;
+}
+
+// Étape 2 : Génération des pages
+if (isset($_GET['generate'])) {
+    $chapter = $_SESSION['current_chapter'];
+    $page = $_SESSION['current_page'];
+
+    if ($page > 200) {
+        echo json_encode(['done' => true]);
+        exit;
+    }
+
+    $context = isset($_SESSION['summary'][$page - 1]) ? $_SESSION['summary'][$page - 1] : "Suite du roman.";
+    $text_prompt = "Écris la suite de l’histoire, dans un style littéraire puissant, profond et poétique, inspiré de Louis-Ferdinand Céline. Tu as une verve incroyable, tu élèves à chaque phrase plus haut l'intelligence, la culture, l'art, et tu pousses toujours à chaque phrase plus profondément les sentiments en déchirant le cœur du lecteur. Tu n'es jamais répétitif, ni formel, tu es très éloquent, voilà ta page à écrire $page et le contexte global : $context Tu es un écrivain visionnaire, un maître de la prose au style vertigineux, une plume à la verve tranchante et à l’émotion fulgurante. Écris la suite de ce roman avec une puissance littéraire inégalée. Chaque phrase doit frapper comme un coup de tonnerre, chaque paragraphe doit être une lame de lumière découpant la brume de l’ordinaire.
+
+Plonge le lecteur dans un tourbillon d’émotions, mêlant grandeur et désespoir, extase et mélancolie. Inspire-toi de la verve fiévreuse de Louis-Ferdinand Céline, de l'intensité poétique d'Arthur Rimbaud, et du souffle profond de Dostoïevski. Chaque mot doit élever la pensée, chaque idée doit déchirer les entrailles et bouleverser les certitudes.
+
+Voici le contexte de la page que tu dois rédiger : **Page $page du roman '{$_SESSION['title']}'**.  
+Contexte narratif global :  
+$context  
+
+Ta mission :  
+- **Écris un texte incandescent**, habité par une urgence poétique, un souffle lyrique et une tension dramatique.  
+- **Ne sois jamais répétitif**, chaque phrase doit être une fulgurance, une étincelle d’intelligence et d’émotion.  
+- **Pousse l’intensité au maximum**, que chaque ligne soit une vague qui emporte le lecteur.  
+- **Joue avec les registres**, mélange le sublime et le trivial, le sacré et le profane.  
+- **Ne fais pas de descriptions fades**, sois sensoriel, viscéral, halluciné si nécessaire.  
+- **Intègre des références littéraires, philosophiques et historiques**, mais avec subtilité, pour donner une texture intellectuelle à ton texte.  
+- **Fais de chaque paragraphe une œuvre d’art**, un fragment de chef-d’œuvre qui marque à jamais le lecteur.  
+
+Écris sans concession, avec une langue vibrante, une structure musicale, une force brute et une grâce indomptable. Fais de cette page un choc esthétique et littéraire.";
+
+    $new_text = callMistralAPI($text_prompt);
+    $_SESSION['story'] .= "\n\nChapitre $chapter - Page $page:\n$new_text";
+
+    $_SESSION['current_page']++;
+    if ($_SESSION['current_page'] % 20 == 0) {
+        $_SESSION['current_chapter']++;
+    }
+
+    echo json_encode(['text' => $new_text, 'page' => $page]);
+    exit;
+}
+?>
+
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Générateur de Roman IA</title>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; background-color: #222; color: #fff; text-align: center; }
+        #container { width: 80%; margin: auto; padding: 20px; background: #333; border-radius: 10px; box-shadow: 0 0 10px #000; }
+        #loader { display: none; font-size: 24px; color: #ffcc00; }
+        #story { text-align: left; white-space: pre-line; font-size: 18px; padding: 10px; }
+        button { padding: 10px 20px; background: #ffcc00; border: none; font-size: 18px; cursor: pointer; border-radius: 5px; }
+        input { padding: 10px; width: 80%; margin: 10px 0; }
+    </style>
+</head>
+<body>
+    <div id="container">
+        <h1>📖 Générateur de Roman IA</h1>
+        <a href="index.php?reset=1">
+            <button style="background: #ff4444; color: white; margin-top: 10px;">🆕 Nouvelle Histoire</button>
+        </a>
+
+        <?php if (empty($_SESSION['title'])): ?>
+            <form method="post">
+                <input type="text" name="subject" placeholder="Entrez le sujet de votre roman..." required>
+                <button type="submit">Générer le Sommaire</button>
+            </form>
+        <?php else: ?>
+            <h2>Roman : <?= htmlspecialchars($_SESSION['title']) ?></h2>
+            <button id="start">Lancer la génération</button>
+            <div id="loader">✍️ Génération en cours...</div>
+            <div id="story"></div>
+        <?php endif; ?>
+    </div>
+
+    <script>
+        $(document).ready(function() {
+            let count = 0;
+            $("#start").click(function() {
+                $("#loader").show();
+                function fetchPart() {
+                    $.get("index.php?generate=1", function(data) {
+                        let result = JSON.parse(data);
+                        if (result.done) {
+                            $("#loader").hide();
+                            return;
+                        }
+                        $("#story").append("<p><strong>Page " + result.page + ":</strong> " + result.text + "</p>");
+                        count++;
+                        if (count < 200) {
+                            setTimeout(fetchPart, 1000);
+                        } else {
+                            $("#loader").hide();
+                        }
+                    });
+                }
+                fetchPart();
+            });
+        });
+    </script>
+</body>
+</html>
